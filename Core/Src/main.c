@@ -22,6 +22,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
+#include <math.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -72,17 +73,29 @@ int __io_putchar(int ch)
 
   return 1;
 }
-volatile uint32_t pulse_count = 0;
+
+static uint16_t CPR = 64;
+static float tim6_period = 0.5;
+
+uint16_t prev_pulse_count = 0;
+int rpm;
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   if (htim == &htim6) {
-    HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+	  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
+	  uint16_t pulse_count = __HAL_TIM_GET_COUNTER(&htim3);
+	  int delta = pulse_count - prev_pulse_count;
+	  int revolutions = delta / 20;
+	  prev_pulse_count = pulse_count;
+	  rpm = (revolutions * 60)/ (CPR * tim6_period);
+	  printf("%d\n", rpm);
   }
 }
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin) {
-    if(GPIO_Pin == GPIO_PIN_6) {  // your encoder pin
-        pulse_count++;
-    }
+float calc_pwm(float val)
+{
+    const float k = 0.13f;
+    const float x0 = 70.0f;
+    return 10000.0f / (1.0f + exp(-k * (val - x0)));
 }
 /* USER CODE END 0 */
 
@@ -128,18 +141,13 @@ int main(void)
   HAL_TIM_Base_Start_IT(&htim6);
   HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
   //HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
-
-  static uint16_t CPR = 64;
-  int16_t rpm = 0;
-  uint32_t old_value = 0;
-  int32_t CH1_DC = 0;
+  int32_t old_value = 0;;
   //HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12, 0); //in2
   //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, 0); //EN1
 
   while (1)
   {
-	  uint32_t value = __HAL_TIM_GET_COUNTER(&htim3);
-	  int16_t delta = value - old_value;
+	  int32_t value = __HAL_TIM_GET_COUNTER(&htim3);
 	    /*if (old_value != value) {
 	      old_value = value;
 	      printf("value = %lu\n", value);
@@ -150,24 +158,29 @@ int main(void)
 	  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12, GPIO_PIN_RESET);
 	  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_SET);
 	  //__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 800); // PWM duty
-	  rpm = (delta * 60) / (CPR * 0.1);
 	  //printf("rpm = %d\n", rpm);
 	  old_value = value;
-	  while(CH1_DC < 65535)
-	      	{
-	      	    TIM2->CCR1 = CH1_DC;
-	      	    CH1_DC += 70;
-	      	    HAL_Delay(1);
-	      	}
-	      	while(CH1_DC > 0)
-	      	{
-	      	    TIM2->CCR1 = CH1_DC;
-	      	    CH1_DC -= 70;
-	      	    HAL_Delay(1);
-	      	}
-	      }
+
+	  /*if (HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13) == 1){
+		  //HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_SET);
+		  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_RESET);
+		  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, 0);
+	  } else {
+		  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, 1);
+		  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_SET);
+	  }*/
+
+	  //float r = 50 * (1.0f + sin(counter / 100.0f));
+	  int r = 40000;
+	  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, r);
+	  //printf("rpm = %d\n", rpm);
+	  //HAL_Delay(10);
+
+	  //HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_2, calc_pwm(g));
+	  //__HAL_TIM_SET_COMPARE(&htim3, TIM_CHANNEL_3, calc_pwm(r));
 	  //pulse_count = 0;
 	  //HAL_Delay(1000);  // wait 1 second
+  }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
