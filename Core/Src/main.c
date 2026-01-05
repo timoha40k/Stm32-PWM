@@ -73,30 +73,60 @@ int __io_putchar(int ch)
 
   return 1;
 }
-
 static uint16_t CPR = 64;
-static float tim6_period = 0.5;
+static float tim6_period = 0.1;
+static uint16_t ARR = 4199;
+
+typedef struct {
+	float Kp, Ki, Kd;
+}pid_controller;
+
+float integral = 0.0;
+float prev_error = 0.0;
+volatile float rpm_measured;
+
+float calculate_pwm(pid_controller* pid, int rpm_set){
+	//Proportion
+	float error = rpm_set - rpm_measured;
+
+	//Integral
+	integral += ((error + prev_error) / 2) * tim6_period;
+
+	//Derivative
+	float derivaive = (error - prev_error) / tim6_period;
+
+	float pwm = (pid->Kp * error) + (pid->Ki * integral) + (pid->Kd * derivaive);
+
+	if(pwm > ARR) pwm = ARR;
+	//if(pwm < 0 || rpm_measured <= 0) pwm = 0;
+	if(rpm_set > 0 && rpm_measured < 0){
+		HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_12);
+		HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_11);
+	} else if(rpm_set < 0 && rpm_measured > 0){
+		HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_12);
+		HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_11);
+	}
+	prev_error = error;
+	return pwm;
+}
 
 uint16_t prev_pulse_count = 0;
-int rpm;
+
+pid_controller pid = {.Kp = 60.0, .Ki = 30.0, .Kd = 0.5};
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   if (htim == &htim6) {
 	  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_5);
 	  uint16_t pulse_count = __HAL_TIM_GET_COUNTER(&htim3);
 	  int delta = pulse_count - prev_pulse_count;
-	  int revolutions = delta / 20;
+	  float revolutions = delta / 20.0f;
 	  prev_pulse_count = pulse_count;
-	  rpm = (revolutions * 60)/ (CPR * tim6_period);
-	  printf("%d\n", rpm);
+	  rpm_measured = (revolutions * 60)/ (CPR * tim6_period);
+	  printf("%d\n", (int)rpm_measured);
+	  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, calculate_pwm(&pid, 88));
   }
 }
-float calc_pwm(float val)
-{
-    const float k = 0.13f;
-    const float x0 = 70.0f;
-    return 10000.0f / (1.0f + exp(-k * (val - x0)));
-}
+
 /* USER CODE END 0 */
 
 /**
@@ -144,6 +174,9 @@ int main(void)
   int32_t old_value = 0;;
   //HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12, 0); //in2
   //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, 0); //EN1
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_SET);
+
 
   while (1)
   {
@@ -155,8 +188,7 @@ int main(void)
 	  //HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, 0); //In1
 	  //HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12, 0); //in2
 	  //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, 0); //EN1
-	  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_12, GPIO_PIN_RESET);
-	  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_11, GPIO_PIN_SET);
+
 	  //__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 800); // PWM duty
 	  //printf("rpm = %d\n", rpm);
 	  old_value = value;
@@ -171,8 +203,10 @@ int main(void)
 	  }*/
 
 	  //float r = 50 * (1.0f + sin(counter / 100.0f));
-	  int r = 40000;
-	  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, r);
+	  int r = 4199;
+	  int rpm_wanted = 50;
+	  //int r = 0;
+
 	  //printf("rpm = %d\n", rpm);
 	  //HAL_Delay(10);
 
@@ -257,7 +291,7 @@ static void MX_TIM2_Init(void)
   htim2.Instance = TIM2;
   htim2.Init.Prescaler = 0;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 65535;
+  htim2.Init.Period = 4199;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -363,7 +397,7 @@ static void MX_TIM6_Init(void)
   htim6.Instance = TIM6;
   htim6.Init.Prescaler = 8399;
   htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 4999;
+  htim6.Init.Period = 999;
   htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
   {
